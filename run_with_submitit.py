@@ -39,8 +39,8 @@ def parse_args():
 
 def get_shared_folder() -> Path:
     user = os.getenv("USER")
-    if Path("/checkpoint/").is_dir():
-        p = Path(f"/checkpoint/{user}/experiments")
+    if Path("/scratch/itee/uqxxu16/dino/checkpoint/").is_dir():
+        p = Path(f"/scratch/itee/uqxxu16/dino/checkpoint/{user}/experiments")
         p.mkdir(exist_ok=True)
         return p
     raise RuntimeError("No shared folder available")
@@ -83,6 +83,13 @@ class Trainer(object):
         self.args.gpu = job_env.local_rank
         self.args.rank = job_env.global_rank
         self.args.world_size = job_env.num_tasks
+        
+        node_list = job_env.hostnames
+        num_nodes = len(node_list)
+        node_0 = node_list[0]
+        os.environ['MASTER_ADDR'] = node_0
+        os.environ['MASTER_PORT'] = '42355'  # 你可以选择一个未使用的端口
+        
         print(f"Process group: {job_env.num_tasks} tasks, rank: {job_env.global_rank}")
 
 
@@ -108,12 +115,13 @@ def main():
         mem_gb=40 * num_gpus_per_node,
         gpus_per_node=num_gpus_per_node,
         tasks_per_node=num_gpus_per_node,  # one task per GPU
-        cpus_per_task=10,
+        cpus_per_task=20,
         nodes=nodes,
         timeout_min=timeout_min,  # max is 60 * 72
         # Below are cluster dependent parameters
         slurm_partition=partition,
         slurm_signal_delay_s=120,
+        slurm_additional_parameters={"gres": "gpu:tesla-smx2:1"},
         **kwargs
     )
 
