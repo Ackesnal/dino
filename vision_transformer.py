@@ -63,6 +63,161 @@ class Mlp(nn.Module):
         x = self.fc2(x)
         x = self.drop(x)
         return x
+        
+        
+
+
+class Mlp(nn.Module):
+    """ MLP as used in Vision Transformer, MLP-Mixer and related networks
+    """
+    def __init__(
+            self,
+            dim_in,
+            dim_hidden=None,
+            dim_out=None,
+            bias=True,
+            drop_path=0.,
+            use_conv=False,
+            channel_idle=False,
+            act_layer=nn.GELU,
+            feature_norm="LayerNorm",
+            idle_ratio=0.75):
+            
+        super().__init__()
+        
+        ######################## ↓↓↓↓↓↓ ########################
+        # Hyperparameters
+        self.dim_in = dim_in
+        self.dim_hidden = dim_hidden or dim_in
+        self.dim_out = dim_out or dim_in
+        ######################## ↑↑↑↑↑↑ ########################
+        
+        ######################## ↓↓↓↓↓↓ ########################
+        # Self-attention projections
+        self.fc1 = nn.Linear(self.dim_in, self.dim_hidden, bias=bias)
+        self.fc2 = nn.Linear(self.dim_hidden, self.dim_out, bias=bias)
+        self.act = act_layer()
+        ######################## ↑↑↑↑↑↑ ########################
+        
+        ######################## ↓↓↓↓↓↓ ########################
+        # Channel-idle
+        self.channel_idle = channel_idle
+        self.act_channels = int(dim_hidden * (1-idle_ratio))
+        ######################## ↑↑↑↑↑↑ ########################
+        
+        ######################## ↓↓↓↓↓↓ ########################
+        self.feature_norm = feature_norm
+        if self.feature_norm == "LayerNorm":
+            self.norm = nn.LayerNorm(self.dim_in)
+        elif self.feature_norm == "BatchNorm":
+            self.norm1 = nn.BatchNorm1d(self.dim_in)
+            self.norm2 = nn.BatchNorm1d(self.dim_hidden)
+        ######################## ↑↑↑↑↑↑ ########################
+        
+        ######################## ↓↓↓↓↓↓ ########################
+        # Drop path
+        self.drop_path = DropPath(drop_path) if drop_path > 0. else None
+        ######################## ↑↑↑↑↑↑ ########################
+        
+    def forward(self, x):
+        B, N, C = x.shape
+        ######################## ↓↓↓ 2-layer MLP ↓↓↓ ########################
+        shortcut = x # B, N, C
+        
+        # 1st Feature normalization
+        if self.feature_norm == "LayerNorm":
+            x = self.norm(x)
+        elif self.feature_norm == "BatchNorm":
+            x = self.norm1(x.transpose(-1,-2)).transpose(-1, -2)
+        
+        # FFN in
+        x = self.fc1(x) # B, N, 4C
+        
+        # Activation
+        if self.channel_idle:
+            print(self.act_channels)
+            mask = torch.zeros_like(x, dtype=torch.bool)
+            mask[:, :, :self.act_channels] = True
+            x = torch.where(mask, self.act(x), x)
+        else:
+            x = self.act(x)
+        
+        # 2nd Feature normalization
+        if self.feature_norm == "BatchNorm":
+            x = self.norm2(x.transpose(-1,-2)).transpose(-1, -2)
+            
+        # FFN out
+        x = self.fc2(x)
+         
+        # Add DropPath
+        x = self.drop_path(x) if self.drop_path is not None else x
+        
+        x = x + shortcut
+        ######################## ↑↑↑ 2-layer MLP ↑↑↑ ########################
+        #if x.get_device() == 0:
+            #print("x after ffn:", x.std(-1).mean().item(), x.mean().item(), x.max().item(), x.min().item())
+        return x
+        
+    def reparam(self):
+        self.eval()
+        with torch.no_grad():
+            mean = self.norm1.running_mean
+            std = torch.sqrt(self.norm1.running_var + self.norm1.eps)
+            weight = self.norm1.weight
+            bias = self.norm1.bias
+            
+            fc1_bias = self.fc1(-mean/std*weight+bias)
+            fc1_weight = self.fc1.weight / std[None, :] * weight[None, :]
+            
+            mean = self.norm2.running_mean
+            std = torch.sqrt(self.norm2.running_var + self.norm2.eps)
+            weight = self.norm2.weight
+            bias = self.norm2.bias
+            
+            fc2_bias = self.fc2(-mean/std*weight+bias)
+            fc2_weight = self.fc2.weight / std[None, :] * weight[None, :]
+            
+            if self.layer_scale:
+                fc2_weight = fc2_weight * self.ls[:, None]
+        
+        return fc1_bias, fc1_weight, fc2_bias, fc2_weight, self.act_channels
+
+
+
+class RePaMlp(nn.Module):
+    def __init__(self, 
+                 fc1_bias, 
+                 fc1_weight, 
+                 fc2_bias, 
+                 fc2_weight,
+                 act_channels, 
+                 act_layer):
+        super().__init__()
+        
+        dim = fc1_weight.shape[1]
+        self.fc1 = nn.Linear(dim, dim)
+        self.fc2 = nn.Linear(dim, act_channels)
+        self.fc3 = nn.Linear(act_channels, dim, bias=False)
+        self.act = act_layer()
+        
+        with torch.no_grad():
+            weight1 = fc1_weight[act_channels:, :].T @ fc2_weight[:, act_channels:].T + torch.eye(dim).to(fc1_weight.device)
+            weight2 = fc1_weight[:act_channels, :]
+            weight3 = fc2_weight[:, :act_channels] 
+            bias1 = (fc1_bias[act_channels:].unsqueeze(0) @ fc2_weight[:, act_channels:].T).squeeze() + fc2_bias
+            bias2 = fc1_bias[:act_channels]
+            
+            self.fc1.weight.copy_(weight1.T)
+            self.fc1.bias.copy_(bias1)
+            self.fc2.weight.copy_(weight2)
+            self.fc2.bias.copy_(bias2)
+            self.fc3.weight.copy_(weight3)
+        
+    def forward(self, x):
+        with torch.no_grad():
+            x = self.fc3(self.act(self.fc2(x))) + self.fc1(x)
+            return x
+            
 
 
 class Attention(nn.Module):
@@ -94,7 +249,8 @@ class Attention(nn.Module):
 
 class Block(nn.Module):
     def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
-                 drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm):
+                 drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, feature_norm="LayerNorm", channel_idle=False,
+                 idle_ratio=0.75):
         super().__init__()
         self.norm1 = norm_layer(dim)
         self.attn = Attention(
@@ -102,7 +258,15 @@ class Block(nn.Module):
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.norm2 = norm_layer(dim)
         mlp_hidden_dim = int(dim * mlp_ratio)
-        self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
+        # self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
+        
+        if channel_idle:
+            self.mlp = Mlp(dim_in=dim, dim_hidden=mlp_hidden_dim, bias=qkv_bias, act_layer=act_layer, 
+                           drop_path=drop_path, feature_norm=feature_norm,
+                           channel_idle=channel_idle, idle_ratio=idle_ratio)
+        else:
+            self.mlp = Mlp(dim_in=dim, dim_hidden=dim_hidden, bias=bias, 
+                           act_layer=act_layer, drop_path=drop_path)
 
     def forward(self, x, return_attention=False):
         y, attn = self.attn(self.norm1(x))
@@ -135,7 +299,8 @@ class VisionTransformer(nn.Module):
     """ Vision Transformer """
     def __init__(self, img_size=[224], patch_size=16, in_chans=3, num_classes=0, embed_dim=768, depth=12,
                  num_heads=12, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop_rate=0., attn_drop_rate=0.,
-                 drop_path_rate=0., norm_layer=nn.LayerNorm, **kwargs):
+                 drop_path_rate=0., norm_layer=nn.LayerNorm, feature_norm="LayerNorm", channel_idle=False, idle_ratio=0.75,
+                 **kwargs):
         super().__init__()
         self.num_features = self.embed_dim = embed_dim
 
@@ -151,7 +316,8 @@ class VisionTransformer(nn.Module):
         self.blocks = nn.ModuleList([
             Block(
                 dim=embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
-                drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer)
+                drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer, 
+                feature_norm=feature_norm, channel_idle=channel_idle, idle_ratio=idle_ratio)
             for i in range(depth)])
         self.norm = norm_layer(embed_dim)
 
