@@ -126,6 +126,7 @@ def get_args_parser():
     parser.add_argument("--dist_url", default="env://", type=str, help="""url used to set up
         distributed training; see https://pytorch.org/docs/stable/distributed.html""")
     parser.add_argument("--local_rank", default=0, type=int, help="Please ignore and do not set this argument.")
+    parser.add_argument("--local-rank", default=0, type=int, help="Please ignore and do not set this argument.")
     
     parser.add_argument('--reparam', default=False, action='store_true')
     parser.add_argument('--channel_idle', default=False, action='store_true')
@@ -172,7 +173,7 @@ def train_dino(args):
             channel_idle=args.channel_idle, 
             idle_ratio=args.idle_ratio,
         )
-        teacher = vits.__dict__[args.arch](patch_size=args.patch_size
+        teacher = vits.__dict__[args.arch](patch_size=args.patch_size,
             feature_norm=args.feature_norm, 
             channel_idle=args.channel_idle, 
             idle_ratio=args.idle_ratio)

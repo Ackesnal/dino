@@ -492,7 +492,6 @@ def init_distributed_mode(args):
         rank=args.rank,
     )
     
-    print("\n\n\nHERE\n\n\n")
     torch.cuda.set_device(args.gpu)
     print('| distributed init (rank {}): {}'.format(
         args.rank, args.dist_url), flush=True)

@@ -45,7 +45,7 @@ class DropPath(nn.Module):
     def forward(self, x):
         return drop_path(x, self.drop_prob, self.training)
 
-
+"""
 class Mlp(nn.Module):
     def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.):
         super().__init__()
@@ -63,7 +63,7 @@ class Mlp(nn.Module):
         x = self.fc2(x)
         x = self.drop(x)
         return x
-        
+"""        
         
 
 
@@ -135,7 +135,6 @@ class Mlp(nn.Module):
         
         # Activation
         if self.channel_idle:
-            print(self.act_channels)
             mask = torch.zeros_like(x, dtype=torch.bool)
             mask[:, :, :self.act_channels] = True
             x = torch.where(mask, self.act(x), x)
@@ -256,7 +255,7 @@ class Block(nn.Module):
         self.attn = Attention(
             dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop)
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
-        self.norm2 = norm_layer(dim)
+        # self.norm2 = norm_layer(dim)
         mlp_hidden_dim = int(dim * mlp_ratio)
         # self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
         
@@ -265,7 +264,7 @@ class Block(nn.Module):
                            drop_path=drop_path, feature_norm=feature_norm,
                            channel_idle=channel_idle, idle_ratio=idle_ratio)
         else:
-            self.mlp = Mlp(dim_in=dim, dim_hidden=dim_hidden, bias=bias, 
+            self.mlp = Mlp(dim_in=dim, dim_hidden=mlp_hidden_dim, bias=qkv_bias, 
                            act_layer=act_layer, drop_path=drop_path)
 
     def forward(self, x, return_attention=False):
@@ -273,7 +272,8 @@ class Block(nn.Module):
         if return_attention:
             return attn
         x = x + self.drop_path(y)
-        x = x + self.drop_path(self.mlp(self.norm2(x)))
+        # x = x + self.drop_path(self.mlp(self.norm2(x)))
+        x = self.mlp(x)
         return x
 
 
