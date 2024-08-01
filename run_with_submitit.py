@@ -112,8 +112,8 @@ def main():
         kwargs['slurm_comment'] = args.comment
 
     executor.update_parameters(
-        mem_gb=40 * num_gpus_per_node,
-        gpus_per_node=num_gpus_per_node,
+        mem_gb=20 * num_gpus_per_node,
+        #gpus_per_node=num_gpus_per_node,
         tasks_per_node=num_gpus_per_node,  # one task per GPU
         cpus_per_task=20,
         nodes=nodes,
@@ -121,7 +121,7 @@ def main():
         # Below are cluster dependent parameters
         slurm_partition=partition,
         slurm_signal_delay_s=120,
-        slurm_additional_parameters={"gres": "gpu:tesla-smx2:1"},
+        slurm_additional_parameters={"gres": f"gpu:tesla-smx2:{num_gpus_per_node}"},
         **kwargs
     )
 
