@@ -57,7 +57,10 @@ def extract_feature_pipeline(args):
 
     # ============ building network ... ============
     if "vit" in args.arch:
-        model = vits.__dict__[args.arch](patch_size=args.patch_size, num_classes=0)
+        model = vits.__dict__[args.arch](patch_size=args.patch_size, num_classes=0,
+            feature_norm=args.feature_norm, 
+            channel_idle=args.channel_idle, 
+            idle_ratio=args.idle_ratio,)
         print(f"Model {args.arch} {args.patch_size}x{args.patch_size} built.")
     elif "xcit" in args.arch:
         model = torch.hub.load('facebookresearch/xcit:main', args.arch, num_classes=0)
@@ -69,6 +72,9 @@ def extract_feature_pipeline(args):
         sys.exit(1)
     model.cuda()
     utils.load_pretrained_weights(model, args.pretrained_weights, args.checkpoint_key, args.arch, args.patch_size)
+    if args.reparam:
+        model.reparam()
+        model.cuda()
     model.eval()
 
     # ============ extract features ... ============
@@ -211,6 +217,12 @@ if __name__ == '__main__':
         distributed training; see https://pytorch.org/docs/stable/distributed.html""")
     parser.add_argument("--local_rank", default=0, type=int, help="Please ignore and do not set this argument.")
     parser.add_argument('--data_path', default='/path/to/imagenet/', type=str)
+    parser.add_argument("--local-rank", default=0, type=int, help="Please ignore and do not set this argument.")
+    
+    parser.add_argument('--reparam', default=False, action='store_true')
+    parser.add_argument('--channel_idle', default=False, action='store_true')
+    parser.add_argument('--idle_ratio', default=0.75, type=float)
+    parser.add_argument('--feature_norm', default='LayerNorm', type=str, choices=['LayerNorm', 'BatchNorm', 'EmpiricalSTD', 'None'])
     args = parser.parse_args()
 
     utils.init_distributed_mode(args)

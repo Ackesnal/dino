@@ -44,28 +44,8 @@ class DropPath(nn.Module):
 
     def forward(self, x):
         return drop_path(x, self.drop_prob, self.training)
-
-"""
-class Mlp(nn.Module):
-    def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.):
-        super().__init__()
-        out_features = out_features or in_features
-        hidden_features = hidden_features or in_features
-        self.fc1 = nn.Linear(in_features, hidden_features)
-        self.act = act_layer()
-        self.fc2 = nn.Linear(hidden_features, out_features)
-        self.drop = nn.Dropout(drop)
-
-    def forward(self, x):
-        x = self.fc1(x)
-        x = self.act(x)
-        x = self.drop(x)
-        x = self.fc2(x)
-        x = self.drop(x)
-        return x
-"""        
+   
         
-
 
 class Mlp(nn.Module):
     """ MLP as used in Vision Transformer, MLP-Mixer and related networks
@@ -175,9 +155,6 @@ class Mlp(nn.Module):
             
             fc2_bias = self.fc2(-mean/std*weight+bias)
             fc2_weight = self.fc2.weight / std[None, :] * weight[None, :]
-            
-            if self.layer_scale:
-                fc2_weight = fc2_weight * self.ls[:, None]
         
         return fc1_bias, fc1_weight, fc2_bias, fc2_weight, self.act_channels
 
@@ -246,6 +223,7 @@ class Attention(nn.Module):
         return x, attn
 
 
+
 class Block(nn.Module):
     def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
                  drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, feature_norm="LayerNorm", channel_idle=False,
@@ -255,10 +233,8 @@ class Block(nn.Module):
         self.attn = Attention(
             dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop)
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
-        # self.norm2 = norm_layer(dim)
-        mlp_hidden_dim = int(dim * mlp_ratio)
-        # self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
         
+        mlp_hidden_dim = int(dim * mlp_ratio)
         if channel_idle:
             self.mlp = Mlp(dim_in=dim, dim_hidden=mlp_hidden_dim, bias=qkv_bias, act_layer=act_layer, 
                            drop_path=drop_path, feature_norm=feature_norm,
@@ -266,15 +242,23 @@ class Block(nn.Module):
         else:
             self.mlp = Mlp(dim_in=dim, dim_hidden=mlp_hidden_dim, bias=qkv_bias, 
                            act_layer=act_layer, drop_path=drop_path)
+                           
+        self.act_layer = act_layer
 
     def forward(self, x, return_attention=False):
         y, attn = self.attn(self.norm1(x))
         if return_attention:
             return attn
         x = x + self.drop_path(y)
-        # x = x + self.drop_path(self.mlp(self.norm2(x)))
         x = self.mlp(x)
         return x
+        
+    def reparam(self):
+        fc1_bias, fc1_weight, fc2_bias, fc2_weight, act_channels = self.mlp.reparam()
+        del self.mlp
+        self.mlp = RePaMlp(fc1_bias, fc1_weight, fc2_bias, fc2_weight, act_channels, self.act_layer)
+        return
+        
 
 
 class PatchEmbed(nn.Module):
@@ -397,6 +381,10 @@ class VisionTransformer(nn.Module):
             if len(self.blocks) - i <= n:
                 output.append(self.norm(x))
         return output
+        
+    def reparam(self):
+        for blk in self.blocks:
+            blk.reparam()
 
 
 def vit_tiny(patch_size=16, **kwargs):
