@@ -122,7 +122,7 @@ def main():
         # Below are cluster dependent parameters
         slurm_partition=partition,
         slurm_signal_delay_s=120,
-        slurm_additional_parameters={"gres": f"gpu:{gres_arch}:{num_gpus_per_node}"},
+        slurm_additional_parameters={"gres": f"gpu:{args.gres_arch}:{num_gpus_per_node}"},
         **kwargs
     )
 
