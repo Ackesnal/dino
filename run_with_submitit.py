@@ -27,6 +27,7 @@ import submitit
 def parse_args():
     parser = argparse.ArgumentParser("Submitit for DINO", parents=[main_dino.get_args_parser()])
     parser.add_argument("--ngpus", default=8, type=int, help="Number of gpus to request on each node")
+    parser.add_argument("--gres_arch", default="tesla-smx2", type=str)
     parser.add_argument("--nodes", default=2, type=int, help="Number of nodes to request")
     parser.add_argument("--timeout", default=2800, type=int, help="Duration of the job")
 
@@ -121,7 +122,7 @@ def main():
         # Below are cluster dependent parameters
         slurm_partition=partition,
         slurm_signal_delay_s=120,
-        slurm_additional_parameters={"gres": f"gpu:tesla-smx2:{num_gpus_per_node}"},
+        slurm_additional_parameters={"gres": f"gpu:{gres_arch}:{num_gpus_per_node}"},
         **kwargs
     )
 
