@@ -70,7 +70,7 @@ class Trainer(object):
         import os
         import submitit
 
-        self.args.dist_url = get_init_file().as_uri()
+        # self.args.dist_url = get_init_file().as_uri()
         print("Requeuing ", self.args)
         empty_trainer = type(self)(self.args)
         return submitit.helpers.DelayedSubmission(empty_trainer)
